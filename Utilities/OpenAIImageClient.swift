@@ -3,31 +3,23 @@
 
 import Foundation
 
-// Provides:
-// - Pexels iconic travel photo URL (25s timeouts)
-// - OpenAI iconic landmark generation (>=120s timeouts)
-// (Start)
+// This calls the Pexels API to fetch an iconic travel photo URL and records attribution. (Start)
 final class OpenAIImageClient {
-    private let pexelsSession: URLSession // End pexelsSession
-    private let openAISession: URLSession // End openAISession
+    private let session: URLSession // End session
 
     init() {
-        let pCfg = URLSessionConfiguration.ephemeral
-        pCfg.timeoutIntervalForRequest = 25
-        pCfg.timeoutIntervalForResource = 25
-        self.pexelsSession = URLSession(configuration: pCfg)
-
-        let oCfg = URLSessionConfiguration.ephemeral
-        oCfg.timeoutIntervalForRequest = 120
-        oCfg.timeoutIntervalForResource = 120
-        self.openAISession = URLSession(configuration: oCfg)
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 25
+        cfg.timeoutIntervalForResource = 25
+        self.session = URLSession(configuration: cfg)
     } // End init
 
     func generateIconicImage(locationName: String) async throws -> URL {
-        let apiKey = infoPlistKey("PEXELS_API_KEY")
-        guard !apiKey.isEmpty else {
+        let apiKey = (Bundle.main.object(forInfoDictionaryKey: "PEXELS_API_KEY") as? String) ?? ""
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
             throw NSError(domain: "Pexels", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing PEXELS_API_KEY"])
-        } // End guard PEXELS_API_KEY
+        } // End guard apiKey
 
         let query = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
@@ -45,139 +37,43 @@ final class OpenAIImageClient {
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        req.timeoutInterval = 25
-        req.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        req.setValue(trimmed, forHTTPHeaderField: "Authorization")
 
         #if DEBUG
         DebugLog.api("Pexels GET \(url.absoluteString)")
         #endif
 
-        let (data, resp) = try await pexelsSession.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
 
         #if DEBUG
-        DebugLog.api("Pexels status \(code)")
+        DebugLog.api("Pexels status \(code)\n\(String(data: data, encoding: .utf8) ?? "<binary>")")
         #endif
 
         guard (200...299).contains(code) else {
-            throw NSError(
-                domain: "Pexels",
-                code: code,
-                userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "HTTP \(code)"]
-            )
+            throw NSError(domain: "Pexels", code: code, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "HTTP \(code)"])
         } // End guard status
 
         let decoded = try JSONDecoder().decode(PexelsSearchResponse.self, from: data)
         guard let photo = decoded.photos.first else {
             throw NSError(domain: "Pexels", code: 404, userInfo: [NSLocalizedDescriptionKey: "No photo found for \(query)"])
-        } // End guard photo
+        } // End guard photo exists
 
         guard let imageURL = photo.src.bestURL() else {
             throw NSError(domain: "Pexels", code: 422, userInfo: [NSLocalizedDescriptionKey: "No usable image URL returned"])
-        } // End guard imageURL
+        } // End guard imageURL exists
 
-        AttributionStore.addPexelsIconic(
-            photographer: photo.photographer,
-            pageURL: URL(string: photo.url),
-            imageURL: imageURL
-        )
+        if let pageURL = URL(string: photo.url) {
+            AttributionStore.add(
+                provider: "Pexels",
+                photographer: photo.photographer,
+                pageURL: pageURL,
+                imageURL: imageURL
+            )
+        } // End if pageURL parsable
 
         return imageURL
     } // End func generateIconicImage (long)
-
-    func generateIconicLandmarkImage(locationName: String, timeoutSeconds: TimeInterval) async throws -> URL {
-        let apiKey = infoPlistKey("OPENAI_API_KEY")
-        guard !apiKey.isEmpty else {
-            throw NSError(domain: "OpenAI", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing OPENAI_API_KEY"])
-        } // End guard OPENAI_API_KEY
-
-        let query = locationName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
-            throw NSError(domain: "OpenAI", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing location name"])
-        } // End guard query
-
-        let opTimeout = max(120, timeoutSeconds)
-
-        let prompt = try await generatePromptViaChat(locationName: query, apiKey: apiKey, timeoutSeconds: opTimeout)
-        let imageData = try await generateImageData(prompt: prompt, apiKey: apiKey, timeoutSeconds: opTimeout)
-
-        let fileURL = try FileStore.savePNG(data: imageData, prefix: "ai_")
-        AttributionStore.addOpenAIIconic(imageURL: fileURL, prompt: prompt)
-
-        #if DEBUG
-        DebugLog.api("OpenAI prompt: \(prompt)")
-        DebugLog.api("OpenAI image saved: \(fileURL.absoluteString)")
-        #endif
-
-        return fileURL
-    } // End func generateIconicLandmarkImage (long)
-
-    private func generatePromptViaChat(locationName: String, apiKey: String, timeoutSeconds: TimeInterval) async throws -> String {
-        let endpoint = URL(string: "https://api.openai.com/v1/responses")!
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.timeoutInterval = max(120, timeoutSeconds)
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let input = """
-        Write a single concise prompt for an iconic landmark travel photograph of: \(locationName).
-        Constraints: photographic, realistic, no text, no watermark, no logos, vivid lighting, high detail.
-        Return only the prompt text.
-        """
-
-        let body: [String: Any] = [
-            "model": "gpt-4o-mini",
-            "input": input
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, resp) = try await openAISession.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        guard (200...299).contains(code) else {
-            throw NSError(domain: "OpenAI", code: code, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "HTTP \(code)"])
-        } // End guard status
-
-        let decoded = try JSONDecoder().decode(OpenAIResponsesResponse.self, from: data)
-        guard let text = decoded.outputText?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            throw NSError(domain: "OpenAI", code: 2, userInfo: [NSLocalizedDescriptionKey: "No prompt returned"])
-        } // End guard prompt text
-
-        return text
-    } // End func generatePromptViaChat (long)
-
-    private func generateImageData(prompt: String, apiKey: String, timeoutSeconds: TimeInterval) async throws -> Data {
-        let endpoint = URL(string: "https://api.openai.com/v1/images/generations")!
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.timeoutInterval = max(120, timeoutSeconds)
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = [
-            "model": "gpt-image-1",
-            "prompt": prompt
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, resp) = try await openAISession.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        guard (200...299).contains(code) else {
-            throw NSError(domain: "OpenAI", code: code, userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "HTTP \(code)"])
-        } // End guard status
-
-        let decoded = try JSONDecoder().decode(OpenAIImagesResponse.self, from: data)
-        guard let b64 = decoded.data.first?.b64_json, let imageData = Data(base64Encoded: b64) else {
-            throw NSError(domain: "OpenAI", code: 3, userInfo: [NSLocalizedDescriptionKey: "No image returned"])
-        } // End guard base64 decode
-
-        return imageData
-    } // End func generateImageData (long)
-
-    private func infoPlistKey(_ name: String) -> String {
-        let raw = (Bundle.main.object(forInfoDictionaryKey: name) as? String) ?? ""
-        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    } // End func infoPlistKey
 } // End OpenAIImageClient
 
 private struct PexelsSearchResponse: Decodable {
@@ -205,38 +101,4 @@ private struct PexelsSearchResponse: Decodable {
         } // End func bestURL
     } // End Src
 } // End PexelsSearchResponse
-
-private struct OpenAIResponsesResponse: Decodable {
-    let output: [Output] // End output
-
-    var outputText: String? {
-        for o in output {
-            if o.type == "message" {
-                for c in o.content ?? [] {
-                    if c.type == "output_text", let t = c.text {
-                        return t
-                    } // End if output_text
-                } // End for content
-            } // End if message
-        } // End for output
-        return nil
-    } // End outputText
-
-    struct Output: Decodable {
-        let type: String? // End type
-        let content: [Content]? // End content
-    } // End Output
-
-    struct Content: Decodable {
-        let type: String? // End type
-        let text: String? // End text
-    } // End Content
-} // End OpenAIResponsesResponse
-
-private struct OpenAIImagesResponse: Decodable {
-    var data: [Item] // End data
-
-    struct Item: Decodable {
-        var b64_json: String? // End b64_json
-    } // End Item
-} // End OpenAIImagesResponse
+// End OpenAIImageClient
