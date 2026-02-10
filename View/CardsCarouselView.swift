@@ -1,17 +1,20 @@
-// ===== File: MyTrip5/View/CardsCarouselView.swift =====
+// Copyright 2025 H2so4 Consulting LLC
 // File: MyTrip5/View/CardsCarouselView.swift
-// Copyright H2so4 Consulting LLC, 2026
+// This shows cards as a portrait-mode carousel and enforces selection rules. (Start)
 
 import SwiftUI
 import SwiftData
 
-// This shows cards as a portrait-mode carousel with card-nav buttons on each card. (Start)
 struct CardsCarouselView: View {
-    @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var services: AppServices
+    @Environment(\.modelContext) private var modelContext // End modelContext
+    @EnvironmentObject private var services: AppServices // End services
 
-    let cards: [TripCard]
-    @State private var selection: Int = 0
+    let cards: [TripCard] // End cards
+
+    @State private var selection: Int = 0 // End selection
+    @State private var selectedCardID: UUID? = nil // End selectedCardID
+
+    private var cardIDs: [UUID] { cards.map { $0.id } } // End cardIDs
 
     var body: some View {
         if cards.isEmpty {
@@ -27,8 +30,14 @@ struct CardsCarouselView: View {
                         card: card,
                         canGoPrevCard: idx > 0,
                         canGoNextCard: idx < (cards.count - 1),
-                        goPrevCard: { selection = max(0, selection - 1) },
-                        goNextCard: { selection = min(cards.count - 1, selection + 1) }
+                        goPrevCard: {
+                            selection = max(0, selection - 1)
+                            selectedCardID = cards[selection].id
+                        },
+                        goNextCard: {
+                            selection = min(cards.count - 1, selection + 1)
+                            selectedCardID = cards[selection].id
+                        }
                     )
                     .padding(.horizontal, 16)
                     .tag(idx)
@@ -38,15 +47,44 @@ struct CardsCarouselView: View {
                 } // End ForEach
             } // End TabView
             .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .onChange(of: cards.count) { oldValue, newValue in
-                if newValue > oldValue {
-                    selection = max(0, newValue - 1)
-                } // End if added
-            } // End onChange cards.count
+            .onAppear {
+                // Initialize selection the first time.
+                if selectedCardID == nil, let first = cards.first {
+                    selectedCardID = first.id
+                    selection = 0
+                } // End if init
+            } // End onAppear
+            .onChange(of: cardIDs) { oldIDs, newIDs in
+                // Selection rules:
+                // - If one card added -> select it.
+                // - If multiple cards added -> select first by date (index 0, because your list is already sorted by date).
+                // - If no cards added -> keep current selection by id (edits must not change selection).
+                let oldSet = Set(oldIDs)
+                let newSet = Set(newIDs)
+                let added = Array(newSet.subtracting(oldSet))
+
+                if !added.isEmpty {
+                    if added.count > 1 {
+                        selectedCardID = cards.first?.id
+                        selection = 0
+                    } else if let id = added.first, let idx = newIDs.firstIndex(of: id) {
+                        selectedCardID = id
+                        selection = idx
+                    } // End if/else added count
+                } else {
+                    if let id = selectedCardID, let idx = newIDs.firstIndex(of: id) {
+                        selection = idx
+                    } else {
+                        selectedCardID = cards.first?.id
+                        selection = 0
+                    } // End if/else keep by id
+                } // End if/else added
+            } // End onChange cardIDs
             .onChange(of: selection) { _, newValue in
                 guard cards.indices.contains(newValue) else { return } // End guard indices
+                selectedCardID = cards[newValue].id
                 Task { await refreshIfNeeded(card: cards[newValue]) } // End Task
-            } // End onChange
+            } // End onChange selection
         } // End if cards.isEmpty
     } // End body
 

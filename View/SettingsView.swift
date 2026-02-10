@@ -1,9 +1,9 @@
-// File: MyTrip5/View/SettingsView.swift
-// Copyright H2so4 Consulting LLC, 2026
+// ============================================================================
+// File: MyTrip5/View/SettingsView.swift  (CHANGED)
+// ============================================================================
 
 import SwiftUI
 
-// This shows the hamburger menu content (unit toggle + About + Thanks To). (Start)
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss // End dismiss
     @EnvironmentObject private var services: AppServices // End services
@@ -11,27 +11,26 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Export") {
+                    NavigationLink("Export PDF…") { ExportRangeView(mode: .pdf) } // End NavigationLink Export PDF
+                    NavigationLink("Export CSV…") { ExportRangeView(mode: .csv) } // End NavigationLink Export CSV
+                } // End Section Export
+
+                Section("Import") {
+                    NavigationLink("Import…") { ImportItineraryView() } // End NavigationLink ImportItineraryView
+                } // End Section Import
+
                 Section("Units") {
                     Picker("Temperature", selection: $services.settings.temperatureUnit) {
                         ForEach(TemperatureUnit.allCases, id: \.self) { unit in
                             Text(unit == .celsius ? "Celsius" : "Fahrenheit").tag(unit)
-                        } // End ForEach TemperatureUnit
-                    } // End Picker Temperature
+                        } // End ForEach units
+                    } // End Picker
                     .pickerStyle(.segmented)
-
-                    Text("Database and API calls are always in Celsius (metric).")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 } // End Section Units
 
                 Section("Thanks To") {
-                    NavigationLink("Thanks To") {
-                        ThanksToView()
-                    } // End NavigationLink ThanksToView
-
-                    Text("Attribution for downloaded photos is listed here.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    NavigationLink("Thanks To") { ThanksToView() } // End NavigationLink ThanksToView
                 } // End Section Thanks To
 
                 Section("About") {
@@ -41,8 +40,8 @@ struct SettingsView: View {
 
                 #if DEBUG
                 Section("Debug") {
-                    Text(debugKeysLine())
-                        .foregroundStyle(debugKeysConfigured() ? .green : .red)
+                    Text(BuildConfig.isConfigured ? "API keys configured." : "Missing API keys in Info.plist build settings.")
+                        .foregroundStyle(BuildConfig.isConfigured ? .green : .red)
                 } // End Section Debug
                 #endif
             } // End Form
@@ -52,18 +51,6 @@ struct SettingsView: View {
                     Button("Done") { dismiss() } // End Button Done
                 } // End ToolbarItem Done
             } // End toolbar
-        } // End NavigationStack (long)
+        } // End NavigationStack
     } // End body
-
-    #if DEBUG
-    private func debugKeysConfigured() -> Bool {
-        let pexels = (Bundle.main.object(forInfoDictionaryKey: "PEXELS_API_KEY") as? String) ?? ""
-        return !pexels.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    } // End func debugKeysConfigured
-
-    private func debugKeysLine() -> String {
-        debugKeysConfigured() ? "Pexels API key configured." : "Missing PEXELS_API_KEY in Info.plist."
-    } // End func debugKeysLine
-    #endif
 } // End SettingsView
-// End SettingsView

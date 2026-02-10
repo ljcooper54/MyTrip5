@@ -1,5 +1,5 @@
+// Copyright 2025 H2so4 Consulting LLC
 // File: MyTrip5/View/CardPicturesSectionView.swift
-// Copyright H2so4 Consulting LLC, 2026
 
 import SwiftUI
 
@@ -18,15 +18,41 @@ struct CardPicturesSectionView: View {
     @Binding var imageIndex: Int // End imageIndex
     @Binding var isGeneratingAI: Bool // End isGeneratingAI
 
+    // NEW: Pexels cycling affordance for iconic image
+    let showPexelsCycle: Bool // End showPexelsCycle
+    let onCyclePexels: () -> Void // End onCyclePexels
+
     let onDeleteCurrent: () -> Void // End onDeleteCurrent
     let onPhotosPicked: ([CardViewModel.PickedPhoto]) async -> Void // End onPhotosPicked
     let onGenerateAI: () async -> Void // End onGenerateAI
+    let onCancelGenerateAI: () -> Void // End onCancelGenerateAI
 
     #if canImport(PhotosUI)
     @State private var selectedItems: [PhotosPickerItem] = [] // End selectedItems
     #endif
 
     var body: some View {
+        ZStack {
+            content // End content
+
+            if isGeneratingAI {
+                generatingOverlay // End generatingOverlay
+            } // End if isGeneratingAI
+        } // End ZStack
+        .onAppear { imageIndex = clampIndex(imageIndex) } // End onAppear
+        .onChange(of: card.pictures.count) { _, _ in
+            imageIndex = clampIndex(imageIndex)
+            card.primaryPictureIndex = imageIndex
+            card.touchUpdated()
+        } // End onChange pictures count
+        .onChange(of: imageIndex) { _, newValue in
+            imageIndex = clampIndex(newValue)
+            card.primaryPictureIndex = imageIndex
+            card.touchUpdated()
+        } // End onChange imageIndex
+    } // End body
+
+    private var content: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 navArrow(enabled: canGoPrevCard, system: "arrow.left", action: goPrevCard)
@@ -37,19 +63,20 @@ struct CardPicturesSectionView: View {
                         .frame(height: 240)
 
                     if card.pictures.isEmpty {
-                        emptyState
+                        tappableEmptyState
                     } else {
-                        PictureDisplayView(ref: card.pictures[imageIndex])
+                        let safeIndex = clampIndex(imageIndex)
+                        PictureDisplayView(ref: card.pictures[safeIndex])
                             .frame(height: 240)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay { browseOverlay }
+                            .overlay { browseOverlay(safeIndex: safeIndex) }
                             .contentShape(Rectangle())
                     } // End if/else pictures empty
                 } // End ZStack picture well
                 .frame(maxWidth: .infinity)
 
                 navArrow(enabled: canGoNextCard, system: "arrow.right", action: goNextCard)
-            } // End HStack card navigation + picture
+            } // End HStack
 
             if !card.pictures.isEmpty {
                 HStack {
@@ -57,66 +84,112 @@ struct CardPicturesSectionView: View {
                         Label("Delete This Photo", systemImage: "trash")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.red)
-                    } // End Button delete current picture
+                    } // End Button delete picture
                     .buttonStyle(.bordered)
 
                     Spacer()
 
-                    Text("\(imageIndex + 1)/\(card.pictures.count)")
+                    Text("\(clampIndex(imageIndex) + 1)/\(card.pictures.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } // End HStack delete/count row
+                } // End HStack
             } // End if has pictures
 
             HStack {
-                photosPickerOrFallback
+                addPhotosPickerButton
 
                 Spacer()
 
                 Button {
                     Task { await onGenerateAI() } // End Task onGenerateAI
                 } label: {
-                    if isGeneratingAI {
-                        ProgressView().frame(width: 120)
-                    } else {
-                        Text("Iconic Image")
-                    } // End if/else isGeneratingAI
+                    Text(iconicButtonTitle)
                 } // End Button Iconic Image
                 .buttonStyle(.borderedProminent)
                 .disabled(isGeneratingAI || card.locationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } // End HStack picker + iconic image
-        } // End VStack pictures section (long)
-        .onAppear { imageIndex = clampIndex(imageIndex) } // End onAppear clamp
-        .onChange(of: card.pictures.count) { _, _ in
-            imageIndex = clampIndex(imageIndex)
-            card.primaryPictureIndex = imageIndex
-            card.touchUpdated()
-        } // End onChange pictures count
-        .onChange(of: imageIndex) { _, newValue in
-            card.primaryPictureIndex = newValue
-            card.touchUpdated()
-        } // End onChange imageIndex
-    } // End body
+            } // End HStack buttons
+        } // End VStack content (long)
+    } // End content
 
-    private var photosPickerOrFallback: some View {
+    private var generatingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                Text("Generating Image…")
+                    .font(.headline)
+
+                ProgressView()
+                    .scaleEffect(1.2)
+
+                Button("Cancel") { onCancelGenerateAI() } // End Button Cancel
+                    .buttonStyle(.bordered)
+            } // End VStack overlay box
+            .padding(18)
+            .frame(maxWidth: 280)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(radius: 10)
+        } // End ZStack overlay
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.15), value: isGeneratingAI)
+    } // End generatingOverlay
+
+    private var iconicButtonTitle: String {
+        hasPexelsIconicOnCard() ? "Generate Iconic Image" : "Iconic Image"
+    } // End iconicButtonTitle
+
+    private func hasPexelsIconicOnCard() -> Bool {
+        for ref in card.pictures {
+            if case .url(let s) = ref {
+                if AttributionStore.has(provider: .pexels, usage: .iconicPexels, imageURLString: s) { return true } // End if attribution match
+            } // End if case .url
+        } // End for ref
+        return false
+    } // End func hasPexelsIconicOnCard
+
+    private var addPhotosPickerButton: some View {
         Group {
             #if canImport(PhotosUI)
             if #available(iOS 16.0, macOS 13.0, *) {
                 PhotosPicker(selection: $selectedItems, maxSelectionCount: 0, matching: .images) {
-                    Text("Photos")
-                } // End PhotosPicker label
+                    Text("Add Photos")
+                } // End PhotosPicker
                 .buttonStyle(.bordered)
                 .onChange(of: selectedItems) { _, items in
                     Task { await convertAndSend(items) } // End Task convertAndSend
                 } // End onChange selectedItems
             } else {
-                Text("Photos unavailable").foregroundStyle(.secondary)
-            } // End if/else #available PhotosPicker
+                Text("Add Photos unavailable").foregroundStyle(.secondary)
+            } // End if/else availability
             #else
-            Text("Photos unavailable").foregroundStyle(.secondary)
+            Text("Add Photos unavailable").foregroundStyle(.secondary)
             #endif
-        } // End Group photosPickerOrFallback
-    } // End photosPickerOrFallback
+        } // End Group
+    } // End addPhotosPickerButton
+
+    private var tappableEmptyState: some View {
+        Group {
+            #if canImport(PhotosUI)
+            if #available(iOS 16.0, macOS 13.0, *) {
+                PhotosPicker(selection: $selectedItems, maxSelectionCount: 0, matching: .images) {
+                    emptyState
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                } // End PhotosPicker emptyState
+                .buttonStyle(.plain)
+                .onChange(of: selectedItems) { _, items in
+                    Task { await convertAndSend(items) } // End Task convertAndSend
+                } // End onChange selectedItems
+            } else {
+                emptyState
+            } // End if/else availability
+            #else
+            emptyState
+            #endif
+        } // End Group
+    } // End tappableEmptyState
 
     #if canImport(PhotosUI)
     @available(iOS 16.0, macOS 13.0, *)
@@ -127,14 +200,14 @@ struct CardPicturesSectionView: View {
             if let id = item.itemIdentifier {
                 picked.append(.init(assetIdentifier: id, data: nil))
                 continue
-            } // End if itemIdentifier
+            } // End if id
 
             let data = try? await item.loadTransferable(type: Data.self)
             picked.append(.init(assetIdentifier: nil, data: data))
-        } // End for item in items
+        } // End for item
 
         await onPhotosPicked(picked)
-    } // End func convertAndSend
+    } // End func convertAndSend (long)
     #endif
 
     private var emptyState: some View {
@@ -142,47 +215,68 @@ struct CardPicturesSectionView: View {
             Image(systemName: "photo.on.rectangle.angled")
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
-            Text("Tap Photos to add pictures")
+
+            Text("No Picture")
                 .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Text("Tap to Add Photos")
+                .font(.caption)
                 .foregroundStyle(.secondary)
         } // End VStack emptyState
     } // End emptyState
 
-    private var browseOverlay: some View {
-        HStack {
-            if imageIndex > 0 {
-                Button { imageIndex = max(0, imageIndex - 1) } label: {
-                    Image(systemName: "arrow.left")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.red)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                } // End Button image prev
-                .padding(.leading, 10)
-            } // End if imageIndex > 0
-
+    private func browseOverlay(safeIndex: Int) -> some View {
+        // Bottom-aligned blue image arrows + optional bottom-left Pexels cycle arrow.
+        VStack {
             Spacer()
 
-            if imageIndex < card.pictures.count - 1 {
-                Button { imageIndex = min(card.pictures.count - 1, imageIndex + 1) } label: {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundStyle(.red)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                } // End Button image next
-                .padding(.trailing, 10)
-            } // End if imageIndex < last
-        } // End HStack browseOverlay (long)
-        .padding(.vertical, 6)
-    } // End browseOverlay
+            HStack {
+                if showPexelsCycle, safeIndex == 0 {
+                    Button(action: onCyclePexels) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.blue)
+                            .padding(4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    } // End Button cycle pexels
+                    .padding(.leading, 10)
+                } else if card.pictures.count > 1, safeIndex > 0 {
+                    Button { imageIndex = max(0, safeIndex - 1) } label: {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.blue)
+                            .padding(4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    } // End Button prev
+                    .padding(.leading, 10)
+                } // End if/else left control
+
+                Spacer()
+
+                if card.pictures.count > 1, safeIndex < card.pictures.count - 1 {
+                    Button { imageIndex = min(card.pictures.count - 1, safeIndex + 1) } label: {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.blue)
+                            .padding(4)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    } // End Button next
+                    .padding(.trailing, 10)
+                } // End if show right
+            } // End HStack
+            .padding(.bottom, 8)
+        } // End VStack
+    } // End func browseOverlay
 
     private func navArrow(enabled: Bool, system: String, action: @escaping () -> Void) -> some View {
+        // Half-size red card navigation arrows.
         Button(action: action) {
             Image(systemName: system)
-                .font(.system(size: 34, weight: .bold))
+                .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.red)
         } // End Button navArrow
         .buttonStyle(.plain)
@@ -191,7 +285,7 @@ struct CardPicturesSectionView: View {
     } // End func navArrow
 
     private func clampIndex(_ value: Int) -> Int {
-        guard !card.pictures.isEmpty else { return 0 } // End guard pictures non-empty
+        guard !card.pictures.isEmpty else { return 0 } // End guard
         return min(max(0, value), card.pictures.count - 1)
     } // End func clampIndex
 } // End CardPicturesSectionView

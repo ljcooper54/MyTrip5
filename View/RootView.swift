@@ -1,5 +1,6 @@
-// File: MyTrip5/View/RootView.swift
-// Copyright H2so4 Consulting LLC, 2026
+// ==============================
+// File: MyTrip5/View/RootView.swift  (CHANGED)
+// ==============================
 
 import SwiftUI
 import SwiftData
@@ -59,6 +60,9 @@ struct RootView: View {
             .onChange(of: services.settings) { _, newValue in
                 newValue.save()
             } // End onChange
+            .task {
+                PhotoURLMigration.runIfNeeded(cards: cards, modelContext: modelContext)
+            } // End task migration
         } // End NavigationStack
         .dynamicTypeSize(.small ... .xxLarge) // End dynamicTypeSize
     } // End body
