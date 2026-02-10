@@ -1,30 +1,24 @@
-//
-//  AppServices.swift
-//  MyTrip5
-//
-//  Created by Lorne Cooper on 1/28/26.
-//
-
-
+// Copyright 2025 H2so4 Consulting LLC
 // File: MyTrip5/Controller/AppServices.swift
-// Copyright H2so4 Consulting LLC, 2026
+// This provides shared settings + API clients for the app. (Start)
 
 import Foundation
 import SwiftUI
 import CoreLocation
 import Combine
 
-// This provides shared settings + API clients for the app. (Start)
 @MainActor
 final class AppServices: ObservableObject {
-    static let shared = AppServices()
+    static let shared = AppServices() // End shared
 
-    @Published var settings = AppSettings()
+    @Published var settings = AppSettings() // End settings
 
-    let openWeather = OpenWeatherClient()
-    let openAIImages = OpenAIImageClient()
-    let geocoder = GeocoderService()
+    let openWeather = OpenWeatherClient() // End openWeather
+    let openAIImages = OpenAIImageClient() // End openAIImages
+    let openAIChat = OpenAIChatClient() // End openAIChat
+    let geocoder = GeocoderService() // End geocoder
 
-    private init() {}
-}
-// End AppServices
+    private init() {} // End init
+} // End AppServices
+
+// End AppServices.swift
